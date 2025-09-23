@@ -25,7 +25,7 @@ model User {
   email         String   @unique
   password      String
   role          Role     @default(USER) 
-  image         String?
+  avatar         String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   isDeleted     Boolean  @default(false)
