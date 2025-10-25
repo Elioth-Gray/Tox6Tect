@@ -8,13 +8,14 @@ import requests
 from bs4 import BeautifulSoup
 import socket
 import random
+import json
 
-# ===== API KEYS (ISI DENGAN PUNYAMU) =====
+# API KEYS 
 API_KEYS = [
-    ""  # ganti dengan key kamu
+    "AIzaSyB2Pyot7AS0f2T3ReaH5rH1rT3OhaPx37U"  # ganti dengan API key milik Anda
 ]
 
-# ===== UTILITIES =====
+# UTILITIES
 def get_video_id_from_url(url_or_id):
     if re.match(r'^[a-zA-Z0-9_-]{11}$', url_or_id):
         return url_or_id
@@ -30,14 +31,14 @@ def get_video_title(youtube, video_id):
     try:
         response = youtube.videos().list(part="snippet", id=video_id).execute()
         if not response["items"]:
-            print(f"⚠️ Video ID {video_id} not found or not public.")
+            print(f" Video ID {video_id} not found or not public.")
             return None
         return response["items"][0]["snippet"]["title"]
     except HttpError as e:
         status = e.resp.status
-        print(f"⚠️ Failed to fetch title via API (HTTP {status}). Trying scraping fallback...")
+        print(f" Failed to fetch title via API (HTTP {status}). Trying scraping fallback...")
     except Exception as e:
-        print(f"⚠️ Failed to fetch title via API. Error: {e}. Trying scraping fallback...")
+        print(f" Failed to fetch title via API. Error: {e}. Trying scraping fallback...")
 
     # Fallback: scrape the YouTube page
     try:
@@ -54,54 +55,16 @@ def get_video_title(youtube, video_id):
         title_tag = soup.find("title")
         if title_tag:
             title = title_tag.text.replace("- YouTube", "").strip()
-            print(f"✅ Title scraped successfully: {title}")
+            print(f" Title scraped successfully: {title}")
             return title
     except Exception as e:
-        print(f"❌ Failed to scrape video title. Error: {e}")
+        print(f" Failed to scrape video title. Error: {e}")
 
     return "Unknown Title"
 
-def get_comment_replies(parent_id, youtube, seen_comments, video_id, video_title):
-    replies = []
-    next_page_token = None
-    while True:
-        try:
-            response = youtube.comments().list(
-                part="snippet",
-                parentId=parent_id,
-                maxResults=100,
-                pageToken=next_page_token,
-                textFormat="plainText"
-            ).execute()
-            for item in response["items"]:
-                reply = item["snippet"]
-                reply_id = item["id"]
-                if reply_id not in seen_comments:
-                    replies.append({
-                        "video_id": video_id,
-                        "video_title": video_title,
-                        "comment_id": parent_id,
-                        "type": "reply",
-                        "author": reply["authorDisplayName"],
-                        "text": reply["textDisplay"],
-                        "like_count": reply.get("likeCount", 0),
-                        "published_at": reply["publishedAt"]
-                    })
-                    seen_comments.add(reply_id)
-            next_page_token = response.get("nextPageToken")
-            if not next_page_token:
-                break
-        except HttpError as e:
-            if e.resp.status in [403, 429]:
-                raise e
-            else:
-                print(f"⚠️ Error while fetching comment replies: {e}")
-                break
-    return replies
-
 def get_video_comments(video_id, api_keys, max_retries=5):
     if not api_keys or api_keys[0] == "YOUR_API_KEY_HERE":
-        print("❌ API key belum diisi! Tambahkan API key YouTube Data API v3 di bagian API_KEYS.")
+        print(" API key belum diisi! Tambahkan API key YouTube Data API v3 di bagian API_KEYS.")
         return []
 
     comments = []
@@ -112,7 +75,7 @@ def get_video_comments(video_id, api_keys, max_retries=5):
 
     video_title = get_video_title(youtube, video_id)
     if not video_title:
-        print(f"❌ Skipping video {video_id} due to missing title.")
+        print(f" Skipping video {video_id} due to missing title.")
         return comments
 
     pbar = tqdm(desc=f"Fetching comments from {video_id}")
@@ -121,12 +84,13 @@ def get_video_comments(video_id, api_keys, max_retries=5):
     while retries < max_retries:
         try:
             response = youtube.commentThreads().list(
-                part="snippet,replies",
+                part="snippet",   # hanya ambil snippet, tanpa replies
                 videoId=video_id,
                 maxResults=100,
                 pageToken=next_page_token,
                 textFormat="plainText"
             ).execute()
+
             for item in response["items"]:
                 comment_snippet = item["snippet"]["topLevelComment"]["snippet"]
                 comment_id = item["snippet"]["topLevelComment"]["id"]
@@ -143,51 +107,49 @@ def get_video_comments(video_id, api_keys, max_retries=5):
                     })
                     seen_comments.add(comment_id)
                     pbar.update(1)
-                if "replies" in item:
-                    replies = get_comment_replies(comment_id, youtube, seen_comments, video_id, video_title)
-                    comments.extend(replies)
-                    pbar.update(len(replies))
+
             next_page_token = response.get("nextPageToken")
             if not next_page_token:
                 break
             time.sleep(0.1)
+
         except HttpError as e:
             if e.resp.status in [403, 429]:
                 api_index += 1
                 if api_index >= len(api_keys):
-                    print("❌ All API keys have reached quota limits.")
+                    print(" All API keys have reached quota limits.")
                     break
-                print(f"🔁 Switching to next API key (index {api_index})...")
+                print(f" Switching to next API key (index {api_index})...")
                 youtube = get_youtube_client(api_index)
                 time.sleep(1)
                 continue
             elif e.resp.status == 404:
-                print(f"⚠️ Video {video_id} not found (404).")
+                print(f" Video {video_id} not found (404).")
                 break
             elif e.resp.status == 403:
-                print(f"⚠️ Comments are disabled for video {video_id}.")
+                print(f" Comments are disabled for video {video_id}.")
                 break
             else:
-                print(f"⚠️ Unexpected HTTP error: {e}")
+                print(f" Unexpected HTTP error: {e}")
                 break
         except (ConnectionResetError, socket.timeout) as e:
             retries += 1
-            print(f"🔁 Network error ({e}). Retrying ({retries}/{max_retries})...")
+            print(f" Network error ({e}). Retrying ({retries}/{max_retries})...")
             time.sleep(5 + random.uniform(1, 3))
             continue
         except Exception as e:
-            print(f"❌ Unknown error while fetching comments: {e}")
+            print(f" Unknown error while fetching comments: {e}")
             break
 
     pbar.close()
     return comments
 
-# ===== VIDEO URLS / IDS =====
+# VIDEO URLS
 video_inputs = [
-    "https://www.youtube.com/watch?v=dMywBOCoLiQ",
+    "https://www.youtube.com/watch?v=FVVkaQB-XW4",
 ]
 
-# ===== EXECUTE =====
+# EXECUTE
 all_comments = []
 for url_or_id in video_inputs:
     vid = get_video_id_from_url(url_or_id)
@@ -195,12 +157,12 @@ for url_or_id in video_inputs:
         result = get_video_comments(vid, API_KEYS)
         all_comments.extend(result)
     else:
-        print(f"❌ Failed to process input: {url_or_id}")
+        print(f" Failed to process input: {url_or_id}")
 
-# ===== SAVE TO CSV =====
+# SAVE TO JSON
 if all_comments:
     df = pd.DataFrame(all_comments)
-    df.to_csv("multi_video_comments_with_title.csv", index=False, encoding="utf-8-sig")
-    print("\n✅ All comments saved to multi_video_comments_with_title.csv")
+    df.to_json("main_comments_only.json", orient="records", force_ascii=False, indent=2)
+    print("\n All main comments saved to main_comments_only.json")
 else:
-    print("\n⚠️ Tidak ada komentar yang berhasil diambil.")
+    print("\n Tidak ada komentar yang berhasil diambil.")
